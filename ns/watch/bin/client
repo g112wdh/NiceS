@@ -1,0 +1,20 @@
+#!/home/s/ops/perl/bin/perl
+use strict;
+use warnings;
+
+use NS::Util::OptConf;
+use NS::Watch::Client;
+
+$| ++;
+
+=head1 SYNOPSIS
+
+ $0 --server 127.0.0.1:9999
+    
+=cut
+
+my $option = NS::Util::OptConf->load();
+my %o = $option->get( qw( server=s ) )->dump();
+$option->assert( 'server' );
+
+NS::Watch::Client->new( %o )->run();
