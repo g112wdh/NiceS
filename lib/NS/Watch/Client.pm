@@ -23,6 +23,7 @@ sub new
         PeerAddr => $this{server},
     );
 
+    die "socket:[addr:$this{server}] $!\n" unless $sock;
     return bless \%this, ref $class || $class;
 }
 
@@ -39,6 +40,7 @@ sub run
         next unless my $input = $_;
         chomp $input;
           
+        next unless $input;
         $sock->send( $input );
 
         map{
