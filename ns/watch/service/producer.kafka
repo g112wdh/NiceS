@@ -1,0 +1,116 @@
+#!/home/s/ops/perl/bin/perl
+use warnings;
+use strict;
+
+use YAML::XS;
+use threads;
+use Thread::Queue;
+use Kafka::Connection;
+use Kafka::Consumer;
+use Kafka qw(
+    $DEFAULT_MAX_BYTES
+    $DEFAULT_MAX_NUMBER_OF_OFFSETS
+    $RECEIVE_LATEST_OFFSET
+    $RECEIVE_EARLIEST_OFFSETS
+);
+use Kafka::Producer;
+use NS::Util::OptConf;
+use NS::Util::Sudo;
+use threads::shared;
+use Data::Dumper;
+use NS::Watch::Client;
+
+use NS::Hermes;
+
+NS::Util::Sudo->sudo();
+$|++;
+
+=head1 SYNOPSIS
+
+ $0 --kafka_addr 127.0.0.1 --kafka_topic foo
+    
+=cut
+
+my $option = NS::Util::OptConf->load();
+my %o = $option->get( qw( kafka_addr=s kafka_topic=s watch_addr=s) )->dump();
+$option->assert( qw( kafka_addr kafka_topic watch_addr ) );
+
+my $connection = Kafka::Connection->new( host => $o{kafka_addr} );
+my $consumer = Kafka::Consumer->new( Connection => $connection );
+
+
+my $o = $consumer->offsets( 
+    $o{kafka_topic}, 0, $RECEIVE_LATEST_OFFSET, $DEFAULT_MAX_NUMBER_OF_OFFSETS 
+); 
+my $offset = shift @$o if $o && ref $o eq 'ARRAY';
+
+my @watch = map{ NS::Watch::Client->new( server => $o{watch_addr} )->indatamodle() }0..9;
+my $watch = 0;
+print Dumper $offset;
+
+my $range = NS::Hermes->new( NS::Util::OptConf->load()->dump( 'range') );
+my $db = $range->db;
+
+my %group;
+my @cluster = $db->select( 'name,node' );
+for my $cluster ( @cluster )
+{
+    my ( $name, $node ) = @$cluster;
+    $group{"node:$node"}{$name} = 1;
+
+}
+   
+while (1) {
+
+
+my $o = $consumer->offsets(
+    $o{kafka_topic}, 0, $RECEIVE_LATEST_OFFSET, $DEFAULT_MAX_NUMBER_OF_OFFSETS
+);
+my $tmp = shift @$o if $o && ref $o eq 'ARRAY';
+
+
+printf "%s\t-\t%s\t%s\n", $tmp, $offset, $tmp - $offset ;
+    my $messages = $consumer->fetch( $o{kafka_topic}, 0, $offset, $DEFAULT_MAX_BYTES );
+    sleep 1 and next unless $messages;
+
+    foreach my $message ( @$messages ) {
+        next unless $message->valid;
+        
+        my $data = eval {YAML::XS::Load $message->payload };
+        $offset = $message->next_offset;
+        next unless $data && ref $data eq 'ARRAY';
+
+        my($node, $mesg) = @$data;
+        my @group = $group{$node} ? keys %{ $group{$node} } : ( 'default' );
+
+        my $m = eval{ YAML::XS::Load $mesg };
+        warn "S$@\n" if $@;
+        next unless $m && ref $m eq 'ARRAY';
+#        print "node:$node\n";
+        for my $table ( @$m )
+        {
+            next if $table->[0][0] ne 'TEST';
+#            print Dumper $table;
+
+#0 10 11
+            shift @$table;
+            for my $row ( @$table )
+            {
+                my ( $name, $stat, $group ) = @$row[qw( 0, 10, 11 )];
+                next if $stat && $stat eq 'ok';
+                #map{ print "@@#$_/$group/$stat#$node#$name\n"; }@group;
+               
+                map{ sendmesg( "@@#$_/$group/$stat#$node#$name\n" ); }@group;
+            }
+        }
+
+    }
+}
+
+
+sub sendmesg
+{
+    $watch ++;
+    $watch = 0 if $watch >9;
+    $watch[$watch]->send( shift );
+}
