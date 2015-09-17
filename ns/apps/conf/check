@@ -1,0 +1,55 @@
+#get:
+#  http: 'http://{}:8360/search.htm?kw=360'
+#  check: 366
+#seco:
+#  http: 'http://{}:8360/search.htm?kw=360'
+#  check: 360
+#  seco: 1
+#post:
+#  http: 'http://{}:8360/search.htm'
+#  check: 360
+#  form:
+#    kw: 360
+#curl:
+#  http: 'http://{}:8360/search.htm?kw=360'
+#  Host: 'www.so.com'
+#  check: 360
+#tcp:
+#  tcp: 8360
+#udp:
+#  udp: 8360
+#code:
+#  code: '/pantheon/util/code/checkapps/foo'
+#testdomain:
+#  dns: '8.8.8.8'
+##  timeout: 5
+#testdns:
+#  domain: 'www.so.com'
+#  timeout: 1
+
+#so_srv_l1eng_libmark:
+#  -
+#    http: 'http://{}:8370/stats'
+#    check: '<http_port>8370</http_port>'
+#  -
+#    http: 'http://{}:9501/stats'
+#    check: '<http_port>9501</http_port>'
+
+so_srv_l1eng_libmark:
+  http: 'http://{}:8370/stats'
+  check: '<http_port>8370</http_port>'
+
+so_www_l1eng_merger:
+  -
+    http: 'http://{}:8370/stats'
+    check: '<http_port>8370</http_port>'
+  -
+    http: 'http://{}:9501/stats'
+    check: '<http_port>9501</http_port>'
+
+so_www_l1eng_clouddns:
+  domain: 'www.so.com'
+
+#udpserver.l1.centos6:
+#  tcp: 7300
+
