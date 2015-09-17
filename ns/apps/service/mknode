@@ -1,0 +1,28 @@
+#!/home/s/ops/perl/bin/perl
+
+use strict;
+use warnings;
+
+use NS::Util::OptConf;
+use NS::Util::DBConn;
+use NS::Hermes;
+
+$| ++;
+
+my $option = NS::Util::OptConf->load();
+my %apps = $option->get()->dump('apps');
+my %util = $option->get()->dump( 'util' );
+
+my @data = NS::Hermes->new( $option->dump( 'range' ) )->db->select( 'name,node' );
+die "hermes db err.\n" unless @data > 10;
+my $r = NS::Util::DBConn->new( "$util{conf}/conn" )
+    ->exe( "select NODE,EXTB from resource" );
+die "get hostname from mysql fail.\n" unless $r && ref $r eq 'ARRAY' && @$r > 10;
+
+my %node;
+map { $node{$_->[1]}{$_->[0]} = '1'; }@data;
+map { $node{$_->[1]} ||= $node{$_->[0]} if $_->[0] && $_->[1]; }@$r;
+
+die "data undef\n" unless $apps{data};
+YAML::XS::DumpFile "$apps{data}/.node", \%node;
+system "mv '$apps{data}/.node' '$apps{data}/node'";
