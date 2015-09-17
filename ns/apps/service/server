@@ -8,8 +8,6 @@ use File::Basename;
 use NS::Util::OptConf;
 set serializer => 'YAML';
 
-use Dancer qw(session debug error );
-use Dancer::Plugin::Database;
 use Data::Dumper;
 
 $| ++;
@@ -17,57 +15,15 @@ $| ++;
 my %opt;
 BEGIN{ %opt = NS::Util::OptConf->load()->dump('apps'); };
 
-my %REGX =
-(
-    app     => '^[\@A-Za-z0-9-_\.]+$',
-    appname =>  '^[\w-_\.]+$',
-    recoder => '^[\@\w\s_:\.-]+$',
-    version =>  '^[\@\w-_\.]+$',
-    version2todo =>  '^[\@\w:-_\.]+$',
-);
-
-sub exesql
-{
-    return unless my $sql = shift;
-    utf8::encode($sql);
-    my $result = [];
-    eval
-    {
-        my $sth = database->prepare( $sql );
-        $sth->execute();
-        $result = $sth->fetchall_arrayref if $sql =~ m/^\s*(select|show)/i;
-    };
-
-    if( $@ ) { error $@; return undef; }
-
-    return $result;
-}
-
-sub allowip
-{
-    my ( $ip, $name ) = @_;
-    my $data = exesql(
-        "select Info name from boxer_package
-             where type='AllowIp' and name='$name'"
-    );
-    return unless $data && ref $data eq 'ARRAY';
-    map{
-        my $allow = $_->[0];
-        $allow =~ s/\./\\./g;
-        $allow =~ s/\*/\\d*/g;
-        return 1 if $ip =~ /^$allow$/;
-    }@$data;
-    return;
-
-}
+my $REGX = '^[\@A-Za-z0-9-_\.]+$';
 
 get "/apps" => sub
 {
     my %param = %{request->params};
-    for( qw( apps node boxer ) )
+    for( qw( apps node pack ) )
     {
         next unless my $s = $param{$_};
-        return "$_ syntax err" unless $s =~ /$REGX{app}/;
+        return "$_ syntax err" unless $s =~ /$REGX/;
         if ( -f "$opt{data}/$_" )
         {
             my $a =  eval{ YAML::XS::LoadFile "$opt{data}/$_" };
@@ -78,172 +34,6 @@ get "/apps" => sub
             return eval{ YAML::XS::LoadFile "$opt{data}/$_/$s" };
         }
     }
-};
-
-get "/boxer/package" => sub
-{
-    my %param = %{request->params};
-    unless( $param{name} )
-    {
-        my $data = exesql( "select distinct name from boxer_package" );
-        return 'get data fail from db.' unless $data && ref $data eq 'ARRAY';
-        my $n = 1;
-        return sprintf "total:\t%d\n%s\n", scalar @$data,
-            join "\n", map{ sprintf "%s:\t%s", $n++, $_->[0] } @$data;
-    }
-
-    return "name syntax error." unless $param{name} =~ /$REGX{appname}/;
-    my $data = exesql( 
-        "select type,info from boxer_package where name='$param{name}'"
-    );
-    return 'get data fail from db.' unless $data && ref $data eq 'ARRAY';
-
-    my ( %noarray, %data ) = ( LocalPath => 1, LocalLink => 1,
-                               Creator => 1, CreateTime => 1, KeepPackage => 1 );
-    map{ 
-        $noarray{$_->[0]} 
-        ? $data{$_->[0]} = $_->[1] 
-        : push @{$data{$_->[0]}}, $_->[1]
-    }@$data;
-    return \%data;
-};
-
-get "/boxer/status" => sub
-{
-    my %param = %{request->params};
-    unless( $param{name} )
-    {
-        my $data = exesql( "select distinct name from boxer_status" );
-        return 'get data fail from db.' unless $data && ref $data eq 'ARRAY';
-        my $n = 1;
-        return sprintf "total:\t%d\n%s\n", scalar @$data,
-            join "\n", map{ sprintf "%s:\t%s", $n++, $_->[0] } @$data;
-    }
-
-    return "name syntax error." unless $param{name} =~ /$REGX{appname}/;
-    my $wv = ( $param{version} && $param{version} =~ /$REGX{version}/ )
-        ? "and version='$param{version}'": '';
-    my $data = exesql( 
-        "select version,depot,stored,status from boxer_status
-             where name='$param{name}' $wv order by version"
-    );
-    return 'get data fail from db.' unless $data && ref $data eq 'ARRAY';
-    my %data;
-    map{ $data{$_->[0]}{$_->[1]}{$_->[2]} = $_->[3]}@$data;
-    return \%data;
-};
-
-
-get "/boxer/history" => sub
-{
-    my %param = %{request->params};
-    my $where = '';
-
-    if( $param{name} )
-    {
-        return "name syntax error." unless $param{name} =~ /$REGX{appname}/;
-        $where = "where name='$param{name}'";
-    }
-
-    my $data = exesql(
-        "select `time`,`name`,`type`,`info` from boxer_history
-             $where order by id desc limit 100" 
-    );
-
-    return 'get data fail from db.' unless $data && ref $data eq 'ARRAY';
-
-    return join "\n", map{ 
-                   splice @$_, 1,1 if $param{name}; 
-                   sprintf "%s: %s", shift @$_, join "|", @$_; 
-           }reverse @$data;
- 
-};
-
-get "/boxer/recoder" => sub
-{
-    my %param = %{request->params};
-
-    map{
-        return "$_ syntax error."
-            unless $param{$_} && $param{$_} =~ /$REGX{appname}/;
-    }qw( name recoder );
-
-    my %recoder = (
-        history => [ qw( name type info ) ],
-        status  => [ qw( name version depot stored status ) ]
-    );
-
-    return "recoder : $param{recoder} undef."
-        unless my $recoder = $recoder{$param{recoder}};
-
-    my $REMOTE_ADDR = request->env->{REMOTE_ADDR};
-    return "$REMOTE_ADDR no allow."
-        unless allowip( $REMOTE_ADDR, $param{name} );
-
-    map{ 
-        return "$_ syntax error."
-            unless $param{$_} && $param{$_} =~ /$REGX{recoder}/;
-    }@$recoder;
-
-    my $sql;
-    if( $param{update} && $param{value} )
-    {
-        map{
-            return "$_ syntax error." unless $param{$_} =~ /$REGX{recoder}/
-        }qw( update value );
-
-        $sql = sprintf "update `boxer_%s` set `%s`='%s' where %s",
-            @param{qw( recoder update value )},
-            join ' and ', map{ "`$_`='$param{$_}'" }
-                grep{ $_ ne $param{update} }@{$recoder{$param{recoder}}};
-            
-    }
-    else
-    {
-        $sql = sprintf "insert into `boxer_$param{recoder}` (`%s`) values('%s')",
-            join( '`,`', @$recoder) , join( "','", map{$param{$_}}@$recoder );
-    }
-    my $r = exesql( $sql );
-    return ( $r && ref $r eq 'ARRAY' ) ? 'OK' : 'FAIL';
-};
-
-get "/boxer/lock" => sub
-{
-    my %param = %{request->params};
-
-    map{ return "$_ syntax error." unless $param{$_}; }qw( name version );
-    return 'name syntax error.' unless $param{name} =~ /$REGX{appname}/;
-    return 'version syntax error.' unless $param{version} =~ /$REGX{version2todo}/;
-
-
-    my $REMOTE_ADDR = request->env->{REMOTE_ADDR};
-    return "$REMOTE_ADDR no allow." unless allowip( $REMOTE_ADDR, $param{name} );
-
-    unless( $param{force} )
-    {
-
-        my $r = exesql( 
-           "select id from boxer_status where name='$param{name}'
-                and version='$param{version}' and stored='self' and status='HasBeenSync'"
-         );
-         return 'check boxer_status fail.' unless  $r && ref $r eq 'ARRAY';
-         return 'check boxer_status no HasBeenSync.' unless @$r;
-    }
-
-    my $r =  exesql( 
-        " replace into boxer_lock (`name`,`version`)
-              values('$param{name}','$param{version}')"
-    );
-    return ( $r && ref $r eq 'ARRAY' ) ? 'OK' : 'FAIL';
-};
-
-
-get "/boxer/depot" => sub
-{
-    my ( $data, %depot ) = exesql( "select name,type,info from boxer_depot order by name" );
-    return 'get depot fail from db.' unless $data && ref $data eq 'ARRAY';
-    map { $depot{$_->[0]}{$_->[1]} = $_->[2]; }@$data;
-    return \%depot;
 };
 
 dance;
