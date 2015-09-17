@@ -1,0 +1,14 @@
+---
+AAA:
+- echo abc
+- echo aaa
+SSS:
+- echo SSS
+idc:
+- echo A:$env{idc}
+start:
+- aaaaaaa
+test:
+- echo ok && echo fail; ls /tmp/asda/s/
+test2:
+- echo test2

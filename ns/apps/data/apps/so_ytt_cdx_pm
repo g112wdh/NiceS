@@ -1,0 +1,15 @@
+---
+offline:
+- echo offline
+online:
+- echo online
+setENV:
+- echo setENV
+stage:
+- '/home/s/ops/ns/apps/bin/boxer stage  '
+start:
+- echo start
+stop:
+- echo stop
+update:
+- /home/s/ops/ns/apps/bin/boxer  update
